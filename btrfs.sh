@@ -1,54 +1,12 @@
 #!/bin/bash
+# Exit immediately if a command exits with a non-zero status
 set -e
-echo "=== Robust Btrfs Setup Script ==="
 
-# List available disks
-echo "Available disks:"
-lsblk -d
-read -rp "Enter disk name (e.g., nvme0n1, sda): " DISK
-SELECTED_DISK="/dev/$DISK"
+# Format the root partition as Btrfs
+mkfs.btrfs -f /dev/nvme0n1p2
 
-# Confirm disk selection
-read -rp "WARNING: All data on $SELECTED_DISK will be lost! Continue? (y/N): " confirm
-if [[ ! $confirm =~ [yY] ]]; then
-    echo "Aborting."
-    exit 1
-fi
-
-# Create partition with parted
-echo "Creating a new Btrfs partition on $SELECTED_DISK..."
-parted "$SELECTED_DISK" --script mklabel gpt
-parted "$SELECTED_DISK" --script mkpart primary btrfs 1MiB 100%
-
-# Wait for partition detection
-echo "Waiting for partition creation..."
-for _ in {1..10}; do
-    if lsblk "$SELECTED_DISK" | grep -q part; then
-        break
-    fi
-    sleep 1
-done
-
-# Get largest partition (newly created)
-PART=$(lsblk -nlo NAME "$SELECTED_DISK" | tail -1)
-NEW_PART="/dev/$PART"
-
-# Verify partition exists
-if [ ! -b "$NEW_PART" ]; then
-    echo "Error: Failed to detect new partition. Aborting."
-    exit 1
-fi
-
-# Format with BTRFS
-echo "Formatting $NEW_PART with BTRFS..."
-mkfs.btrfs -f --label ARCH "$NEW_PART"
-
-# Prepare mount point
-umount -R /mnt 2>/dev/null || true
-mkdir -p /mnt
-
-# Create base subvolumes
-mount "$NEW_PART" /mnt
+# Create subvolumes on the partition
+mount /dev/nvme0n1p2 /mnt
 btrfs subvolume create /mnt/@
 btrfs subvolume create /mnt/@home
 btrfs subvolume create /mnt/@var
@@ -58,35 +16,20 @@ btrfs subvolume create /mnt/@pkg
 btrfs subvolume create /mnt/@snapshots
 umount /mnt
 
-# Create directory structure
-mkdir -p /mnt/{boot/efi,home,var/{log,tmp,cache/pacman/pkg},.snapshots}
+# Mount the root partition with subvolume @ and specific options
+mount -o noatime,compress=zstd,subvol=@,commit=120,space_cache=v2 /dev/nvme0n1p2 /mnt
 
-# Mount with optimized options
-mount -o noatime,compress=zstd:3,space_cache=v2,subvol=@ "$NEW_PART" /mnt
-mount -o noatime,compress=zstd:3,subvol=@home "$NEW_PART" /mnt/home
-mount -o noatime,compress=zstd:3,subvol=@var "$NEW_PART" /mnt/var
-mount -o noatime,compress=zstd:3,subvol=@log "$NEW_PART" /mnt/var/log
-mount -o noatime,subvol=@tmp "$NEW_PART" /mnt/var/tmp
-mount -o noatime,subvol=@pkg "$NEW_PART" /mnt/var/cache/pacman/pkg
-mount -o noatime,compress=zstd:3,subvol=@snapshots "$NEW_PART" /mnt/.snapshots
+# Create directories for the other subvolumes
+mkdir -p /mnt/{home,var,var/log,var/tmp,var/cache/pacman/pkg,.snapshots}
+
+# Mount each subvolume with desired options
+mount -o noatime,compress=zstd,subvol=@home,commit=120,space_cache=v2 /dev/nvme0n1p2 /mnt/home
+mount -o noatime,compress=zstd,subvol=@var,commit=120,space_cache=v2 /dev/nvme0n1p2 /mnt/var
+mount -o noatime,compress=zstd,subvol=@log,commit=120,space_cache=v2 /dev/nvme0n1p2 /mnt/var/log
+mount -o noatime,compress=zstd,subvol=@tmp,commit=120,space_cache=v2 /dev/nvme0n1p2 /mnt/var/tmp
+mount -o noatime,compress=zstd,subvol=@pkg,commit=120,space_cache=v2 /dev/nvme0n1p2 /mnt/var/cache/pacman/pkg
+mount -o noatime,compress=zstd,subvol=@snapshots,commit=120,space_cache=v2 /dev/nvme0n1p2 /mnt/.snapshots
 
 # Mount EFI partition
-while true; do
-    echo "Available EFI partitions:"
-    lsblk -f | awk '/vfat/ {print $1,$2,$4}'
-    read -rp "Enter EFI partition (e.g., nvme0n1p1): " EFIPART
-    EFI_CHECK="/dev/$EFIPART"
-    
-    if ! lsblk -f "$EFI_CHECK" | grep -q vfat; then
-        echo "Error: $EFI_CHECK is not a FAT32 partition."
-    else
-        mkdir -p /mnt/boot/efi
-        mount "$EFI_CHECK" /mnt/boot/efi && break
-    fi
-done
-
-echo "✅ Setup complete! System ready for installation."
-echo "➡ Recommended next steps:"
-echo "1. pacstrap /mnt base linux linux-firmware"
-echo "2. genfstab -U /mnt >> /mnt/etc/fstab"
-echo "3. arch-chroot /mnt"
+mkdir -p /mnt/boot/efi
+mount /dev/nvme0n1p1 /mnt/boot/efi
