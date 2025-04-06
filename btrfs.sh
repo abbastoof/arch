@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== Arch Linux Btrfs Setup ==="
+echo "=== Arch Linux Btrfs Setup (New Partition Only) ==="
 echo ""
 
 # List available disks (only physical disks, not partitions)
