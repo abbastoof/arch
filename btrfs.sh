@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 
 echo "=== Arch Linux LUKS + Btrfs Setup with Snapper + Zram ==="
@@ -10,24 +9,29 @@ read -rp "Enter the disk where you want to create a partition (e.g., /dev/nvme0n
 
 # Find unallocated space using parted
 echo "Checking unallocated space on $DISK..."
-FREE_LINE=$(parted "$DISK" unit MiB print free | grep "Free Space" | tail -n 1)
+# Filter out free space rows that have size > 0
+FREE_LINE=$(parted "$DISK" unit MiB print free | awk '/Free Space/ && ($3+0)>0 { print $0 }' | tail -n 1)
 
-START=$(echo "$FREE_LINE" | awk '{print $1}' | sed 's/MiB//')
-END=$(echo "$FREE_LINE" | awk '{print $2}' | sed 's/MiB//')
-SIZE=$(echo "$FREE_LINE" | awk '{print $3}' | sed 's/MiB//')
+# Extract the start, end, and size values, stripping units
+START=$(echo "$FREE_LINE" | awk '{print $1}' | sed 's/[^0-9.]//g')
+END=$(echo "$FREE_LINE" | awk '{print $2}' | sed 's/[^0-9.]//g')
+SIZE=$(echo "$FREE_LINE" | awk '{print $3}' | sed 's/[^0-9.]//g')
 
 if [[ -z "$START" || -z "$END" ]]; then
   echo "No unallocated space found on $DISK."
   exit 1
 fi
 
-echo "Last unallocated space: $SIZE MiB ($START → $END)"
+# Subtract 1 MiB from the end to stay within disk bounds
+END=$(echo "$END - 1" | bc)
+
+echo "Last unallocated space: ${SIZE}MiB (from ${START}MiB to ${END}MiB)"
 
 # Ask to create a new partition
 read -rp "Create new partition in this space? (yes/[no]): " CREATE_PART
 [[ "$CREATE_PART" != "yes" ]] && echo "Aborted." && exit 1
 
-# Create new partition using parted
+# Create new partition using parted (appending 'MiB' unit)
 echo "Creating new partition on $DISK..."
 parted -s "$DISK" mkpart primary btrfs "${START}MiB" "${END}MiB"
 partprobe "$DISK"
@@ -37,7 +41,7 @@ sleep 2
 NEW_PART=$(lsblk -dpno NAME "$DISK" | tail -n 1)
 echo "Created: $NEW_PART"
 
-# Setup LUKS encryption
+# Setup LUKS encryption interactively with LUKS2
 echo "Encrypting $NEW_PART with LUKS2..."
 cryptsetup luksFormat --type luks2 "$NEW_PART"
 cryptsetup open "$NEW_PART" cryptroot
@@ -45,7 +49,7 @@ cryptsetup open "$NEW_PART" cryptroot
 # Format as Btrfs
 mkfs.btrfs -f /dev/mapper/cryptroot
 
-# Create subvolumes
+# Create Btrfs subvolumes
 mount /dev/mapper/cryptroot /mnt
 for sub in @ @home @var @log @tmp @pkg @snapshots; do
   btrfs subvolume create /mnt/$sub
@@ -76,11 +80,11 @@ cat <<EOF > /mnt/etc/systemd/zram-generator.conf.d/zram.conf
 zram-size = ram
 EOF
 
-# Done
+# Completion message
 echo
 echo "✅ All set!"
 echo "➡ Now run 'archinstall' and choose 'Use current mount points'."
-echo "➡ After install, boot into the new system and install Snapper:"
+echo "➡ After installation, boot into the new system and install Snapper:"
 echo "   sudo pacman -Sy snapper"
 echo "   sudo snapper --config root create-config /"
 echo "   sudo snapper --config home create-config /home"
