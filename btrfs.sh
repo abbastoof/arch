@@ -10,18 +10,18 @@ read -rp "Enter the disk where you want to create a partition (e.g., /dev/nvme0n
 
 # Find unallocated space using parted
 echo "Checking unallocated space on $DISK..."
-UNALLOCATED=$(parted "$DISK" unit MiB print free | grep "Free Space" | tail -n 1 | awk '{print $1, $2, $3}')
+FREE_LINE=$(parted "$DISK" unit MiB print free | grep "Free Space" | tail -n 1)
 
-START=$(echo "$UNALLOCATED" | awk '{print $1}')
-END=$(echo "$UNALLOCATED" | awk '{print $2}')
-SIZE=$(echo "$UNALLOCATED" | awk '{print $3}')
+START=$(echo "$FREE_LINE" | awk '{print $1}' | sed 's/MiB//')
+END=$(echo "$FREE_LINE" | awk '{print $2}' | sed 's/MiB//')
+SIZE=$(echo "$FREE_LINE" | awk '{print $3}' | sed 's/MiB//')
 
 if [[ -z "$START" || -z "$END" ]]; then
   echo "No unallocated space found on $DISK."
   exit 1
 fi
 
-echo "Last unallocated space: $SIZE ($START to $END)"
+echo "Last unallocated space: $SIZE MiB ($START → $END)"
 
 # Ask to create a new partition
 read -rp "Create new partition in this space? (yes/[no]): " CREATE_PART
@@ -29,7 +29,7 @@ read -rp "Create new partition in this space? (yes/[no]): " CREATE_PART
 
 # Create new partition using parted
 echo "Creating new partition on $DISK..."
-parted -s "$DISK" mkpart primary btrfs "$START" "$END"
+parted -s "$DISK" mkpart primary btrfs "${START}MiB" "${END}MiB"
 partprobe "$DISK"
 sleep 2
 
@@ -68,7 +68,7 @@ lsblk -f | grep vfat
 read -rp "Enter EFI system partition (e.g., /dev/nvme0n1p1): " EFIPART
 mount "$EFIPART" /mnt/boot
 
-# Set up zram (auto)
+# Set up zram config for systemd-zram-generator
 echo "Installing systemd-zram-generator config..."
 mkdir -p /mnt/etc/systemd/zram-generator.conf.d
 cat <<EOF > /mnt/etc/systemd/zram-generator.conf.d/zram.conf
@@ -76,10 +76,12 @@ cat <<EOF > /mnt/etc/systemd/zram-generator.conf.d/zram.conf
 zram-size = ram
 EOF
 
-echo "=== DONE! Run 'archinstall' and choose 'Use current mount points'. ==="
-echo "After installation, to install Snapper and configure it:"
-echo "1. Boot into the system."
-echo "2. Install Snapper: 'sudo pacman -Sy snapper'."
-echo "3. Run 'snapper --config root create-config /'."
-echo "4. Run 'snapper --config home create-config /home'."
-echo "5. Enable Snapper timers: 'sudo systemctl enable snapper-timeline.timer' and 'sudo systemctl enable snapper-cleanup.timer'."
+# Done
+echo
+echo "✅ All set!"
+echo "➡ Now run 'archinstall' and choose 'Use current mount points'."
+echo "➡ After install, boot into the new system and install Snapper:"
+echo "   sudo pacman -Sy snapper"
+echo "   sudo snapper --config root create-config /"
+echo "   sudo snapper --config home create-config /home"
+echo "   sudo systemctl enable snapper-timeline.timer snapper-cleanup.timer"
