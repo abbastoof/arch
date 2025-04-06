@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== Arch Linux LUKS + Btrfs Setup with Snapper + Zram ==="
+echo "=== Arch Linux Btrfs Setup ==="
 echo ""
 
 # List available disks (only physical disks, not partitions)
@@ -62,55 +62,34 @@ NEW_PART=$(lsblk -dpno NAME "$SELECTED_DISK" | tail -n 1)
 echo "Created partition: $NEW_PART"
 echo ""
 
-# Confirm the partition is not formatted or overwritten by checking existing filesystem
-if lsblk -f "$NEW_PART" | grep -q "PART"; then
-    echo "Error: The selected partition already has a filesystem. Aborting."
-    exit 1
-fi
+# Format the new partition as Btrfs
+echo "Formatting $NEW_PART as Btrfs..."
+mkfs.btrfs -f "$NEW_PART"
 
-# Set up LUKS encryption interactively (using LUKS2)
-echo "Encrypting $NEW_PART with LUKS2..."
-cryptsetup luksFormat --type luks2 "$NEW_PART"
-cryptsetup open "$NEW_PART" cryptroot
-
-# Format the opened LUKS container as Btrfs
-mkfs.btrfs -f /dev/mapper/cryptroot
-
-# Create Btrfs subvolumes
-mount /dev/mapper/cryptroot /mnt
+# Mount the Btrfs partition and create subvolumes
+echo "Creating Btrfs subvolumes..."
+mount "$NEW_PART" /mnt
 for sub in @ @home @var @log @tmp @pkg @snapshots; do
     btrfs subvolume create /mnt/"$sub"
 done
 umount /mnt
 
-# Mount subvolumes with desired options
-mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@ /dev/mapper/cryptroot /mnt
+# Prepare the mount points for Arch Linux installation
+echo "Mounting Btrfs subvolumes..."
+mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@ "$NEW_PART" /mnt
 mkdir -p /mnt/{home,var,var/log,var/tmp,var/cache/pacman/pkg,.snapshots,boot}
-mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@home /dev/mapper/cryptroot /mnt/home
-mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@var /dev/mapper/cryptroot /mnt/var
-mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@log /dev/mapper/cryptroot /mnt/var/log
-mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@tmp /dev/mapper/cryptroot /mnt/var/tmp
-mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@pkg /dev/mapper/cryptroot /mnt/var/cache/pacman/pkg
-mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@snapshots /dev/mapper/cryptroot /mnt/.snapshots
+mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@home "$NEW_PART" /mnt/home
+mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@var "$NEW_PART" /mnt/var
+mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@log "$NEW_PART" /mnt/var/log
+mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@tmp "$NEW_PART" /mnt/var/tmp
+mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@pkg "$NEW_PART" /mnt/var/cache/pacman/pkg
+mount -o noatime,compress=zstd,commit=120,space_cache=v2,subvol=@snapshots "$NEW_PART" /mnt/.snapshots
 
-# Mount EFI partition (list vfat partitions first)
+# Mount EFI partition (list vfat partitions first) to /mnt/boot/efi
 lsblk -f | grep vfat
 read -rp "Enter EFI system partition (e.g., /dev/nvme0n1p1): " EFIPART
-mount "$EFIPART" /mnt/boot
-
-# Configure zram for systemd-zram-generator
-echo "Installing systemd-zram-generator config..."
-mkdir -p /mnt/etc/systemd/zram-generator.conf.d
-cat <<EOF > /mnt/etc/systemd/zram-generator.conf.d/zram.conf
-[zram0]
-zram-size = ram
-EOF
+mount "$EFIPART" /mnt/boot/efi
 
 echo ""
-echo "✅ All set!"
+echo "✅ All set! The new partition is ready for Arch installation."
 echo "➡ Now run 'archinstall' and choose 'Use current mount points'."
-echo "➡ After installation, boot into the new system and install Snapper:"
-echo "   sudo pacman -Sy snapper"
-echo "   sudo snapper --config root create-config /"
-echo "   sudo snapper --config home create-config /home"
-echo "   sudo systemctl enable snapper-timeline.timer snapper-cleanup.timer"
