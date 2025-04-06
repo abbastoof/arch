@@ -62,6 +62,12 @@ NEW_PART=$(lsblk -dpno NAME "$SELECTED_DISK" | tail -n 1)
 echo "Created partition: $NEW_PART"
 echo ""
 
+# Confirm the partition is not formatted or overwritten by checking existing filesystem
+if lsblk -f "$NEW_PART" | grep -q "PART"; then
+    echo "Error: The selected partition already has a filesystem. Aborting."
+    exit 1
+fi
+
 # Set up LUKS encryption interactively (using LUKS2)
 echo "Encrypting $NEW_PART with LUKS2..."
 cryptsetup luksFormat --type luks2 "$NEW_PART"
