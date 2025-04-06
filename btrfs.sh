@@ -2,7 +2,7 @@
 set -e
 
 # Variables
-ROOT_PART="/dev/nvme0n1p2"
+ROOT_PART="/dev/nvme0n1p4"
 EFI_PART="/dev/nvme0n1p1"
 MNT="/mnt"
 BTRFS_OPTS="noatime,compress=zstd,commit=120,space_cache=v2"
@@ -60,7 +60,7 @@ else
     fi
 fi
 
-mkdir -p "$MNT/boot/efi"
-mount "$EFI_PART" "$MNT/boot/efi"
+mkdir -p "$MNT/boot"
+mount "$EFI_PART" "$MNT/boot"
 
 echo "✅ All subvolumes and EFI are mounted correctly at $MNT"
