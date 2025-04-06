@@ -16,58 +16,33 @@ INDEX=$((DISK_NUM-1))
 SELECTED_DISK="/dev/${DISKS[$INDEX]}"
 echo "Selected disk: $SELECTED_DISK"
 echo ""
-# Check that the disk has a GPT partition table
-if ! parted -s "$SELECTED_DISK" print | grep -q "Partition Table: gpt"; then
-    echo "Error: Selected disk does not have a GPT partition table. Aborting."
-    exit 1
-fi
 
-# Find unallocated space using parted (unit: MB instead of MiB for better precision)
-echo "Checking unallocated space on $SELECTED_DISK..."
-parted -s "$SELECTED_DISK" unit MB print free
-FREE_LINE=$(parted -s "$SELECTED_DISK" unit MB print free | grep "Free Space" | sort -k3 -n | tail -n 1)
-if [ -z "$FREE_LINE" ]; then
-    echo "No unallocated space found on $SELECTED_DISK."
-    exit 1
-fi
-
-# Extract start, end, and size values (strip "MB")
-START=$(echo "$FREE_LINE" | awk '{print $1}' | sed 's/MB//g')
-END=$(echo "$FREE_LINE" | awk '{print $2}' | sed 's/MB//g')
-SIZE=$(echo "$FREE_LINE" | awk '{print $3}' | sed 's/MB//g')
-
-# Calculate the end point for a 300GiB partition (in MB)
-TARGET_SIZE=314572.8  # 300GiB in MB (300*1024*1.024)
-if (( $(echo "$SIZE < $TARGET_SIZE" | bc -l) )); then
-    echo "Warning: Available space (${SIZE} MB) is less than 300GiB (${TARGET_SIZE} MB)"
-    read -rp "Continue with the maximum available space? (yes/[no]): " CONTINUE
+# Check for at least 300GiB of free space
+FREE_SPACE=$(fdisk -l "$SELECTED_DISK" | grep -i "free space" | awk '{print $4}')
+if [ -z "$FREE_SPACE" ] || [ "$FREE_SPACE" -lt 314572800 ]; then  # 300GiB in KB
+    echo "Warning: Insufficient free space on $SELECTED_DISK"
+    echo "Available free space: $(($FREE_SPACE / 1048576)) GiB"
+    read -rp "Continue anyway? (yes/[no]): " CONTINUE
     if [[ "$CONTINUE" != "yes" ]]; then
         echo "Aborted."
         exit 1
     fi
-    NEW_END=$END
-else
-    NEW_END=$(echo "$START + $TARGET_SIZE" | bc)
-    if (( $(echo "$NEW_END > $END" | bc -l) )); then
-        NEW_END=$END
-    fi
 fi
 
-# Subtract a small amount to avoid boundary issues
-NEW_END=$(echo "$NEW_END - 1" | bc)
-echo "Found free space: ${SIZE} MB (from ${START} MB to ${END} MB)"
-echo "Creating a partition from ${START} MB to ${NEW_END} MB"
-echo ""
-read -rp "Create new partition in this space? (yes/[no]): " CREATE_PART
-if [[ "$CREATE_PART" != "yes" ]]; then
-    echo "Aborted."
-    exit 1
-fi
+echo "Creating new 300GiB partition on $SELECTED_DISK..."
+# Use fdisk to create a new partition with the desired size
+fdisk "$SELECTED_DISK" <<EOF
+n
+p
 
-# Create new partition on the selected disk using parted (using MB units)
-echo "Creating new partition on $SELECTED_DISK..."
-# Use script to interact with parted and use optimal alignment
-echo "mkpart primary btrfs ${START}MB ${NEW_END}MB" | parted "$SELECTED_DISK"
+
++300G
+t
+$(fdisk -l "$SELECTED_DISK" | grep -i "number of partitions" | awk '{print $NF}')
+83
+w
+EOF
+
 partprobe "$SELECTED_DISK"
 sleep 2
 
