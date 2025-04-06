@@ -2,7 +2,7 @@
 set -e
 
 # Variables
-ROOT_PART="/dev/nvme0n1p2"
+ROOT_PART="/dev/nvme0n1p4"
 EFI_PART="/dev/nvme0n1p1"
 MNT="/mnt"
 BTRFS_OPTS="noatime,compress=zstd,commit=120,space_cache=v2"
