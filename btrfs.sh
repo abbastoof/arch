@@ -44,7 +44,22 @@ mount -o $BTRFS_OPTS,subvol=@tmp        "$ROOT_PART" "$MNT/var/tmp"
 mount -o $BTRFS_OPTS,subvol=@pkg        "$ROOT_PART" "$MNT/var/cache/pacman/pkg"
 mount -o $BTRFS_OPTS,subvol=@snapshots  "$ROOT_PART" "$MNT/.snapshots"
 
-# Mount EFI partition
+# Mount EFI partition with confirmation
+echo "==> EFI partition detected at $EFI_PART"
+read -rp "Do you want to format the EFI partition? (yes/no): " FORMAT_EFI
+
+if [[ "$FORMAT_EFI" == "yes" ]]; then
+    echo "==> Formatting EFI partition as FAT32..."
+    mkfs.fat -F32 "$EFI_PART"
+else
+    echo "==> Skipping EFI format. Checking filesystem type..."
+    EFI_TYPE=$(blkid -s TYPE -o value "$EFI_PART")
+    if [[ "$EFI_TYPE" != "vfat" ]]; then
+        echo "⚠️ EFI partition is not vfat (found: $EFI_TYPE)"
+        echo "If this is incorrect, you may need to fix it manually."
+    fi
+fi
+
 mkdir -p "$MNT/boot"
 mount "$EFI_PART" "$MNT/boot"
 
