@@ -1,51 +1,50 @@
 #!/bin/bash
 set -e
 
-# Variables (change these if needed)
+# Variables
 ROOT_PART="/dev/nvme0n1p2"
 EFI_PART="/dev/nvme0n1p1"
-MOUNTPOINT="/mnt"
+MNT="/mnt"
 BTRFS_OPTS="noatime,compress=zstd,commit=120,space_cache=v2"
 
-# WARNING: This will erase all data on ${ROOT_PART}
-echo "Formatting ${ROOT_PART} as Btrfs..."
+echo "==> Formatting root partition: $ROOT_PART"
 mkfs.btrfs -f "$ROOT_PART"
 
-# Mount the partition temporarily to create subvolumes
-echo "Mounting ${ROOT_PART} temporarily to create subvolumes..."
-mount "$ROOT_PART" "$MOUNTPOINT"
+echo "==> Creating subvolumes..."
+mount "$ROOT_PART" "$MNT"
+btrfs subvolume create "$MNT/@"
+btrfs subvolume create "$MNT/@home"
+btrfs subvolume create "$MNT/@var"
+btrfs subvolume create "$MNT/@log"
+btrfs subvolume create "$MNT/@tmp"
+btrfs subvolume create "$MNT/@pkg"
+btrfs subvolume create "$MNT/@snapshots"
+umount "$MNT"
 
-echo "Creating Btrfs subvolumes..."
-btrfs subvolume create "$MOUNTPOINT/@"
-btrfs subvolume create "$MOUNTPOINT/@home"
-btrfs subvolume create "$MOUNTPOINT/@var"
-btrfs subvolume create "$MOUNTPOINT/@log"
-btrfs subvolume create "$MOUNTPOINT/@tmp"
-btrfs subvolume create "$MOUNTPOINT/@pkg"
-btrfs subvolume create "$MOUNTPOINT/@snapshots"
+echo "==> Mounting subvolumes..."
+mount -o $BTRFS_OPTS,subvol=@ "$ROOT_PART" "$MNT"
 
-# Unmount the temporary mount
-umount "$MOUNTPOINT"
+# Create mountpoints
+mkdir -p "$MNT/home"
+mkdir -p "$MNT/var"
 
-# Mount the subvolumes using our desired options
-echo "Mounting the Btrfs subvolumes..."
+# Mount @var before making nested dirs inside it
+mount -o $BTRFS_OPTS,subvol=@var "$ROOT_PART" "$MNT/var"
 
-# Mount root subvolume
-mount -o $BTRFS_OPTS,subvol=@ "$ROOT_PART" "$MOUNTPOINT"
+# Now we can safely create these
+mkdir -p "$MNT/var/log"
+mkdir -p "$MNT/var/tmp"
+mkdir -p "$MNT/var/cache/pacman/pkg"
 
-# Create all needed directories BEFORE mounting nested subvolumes
-mkdir -p "$MOUNTPOINT"/{home,var,var/log,var/tmp,var/cache/pacman/pkg,.snapshots,boot}
+# Mount nested subvolumes
+mount -o $BTRFS_OPTS,subvol=@home "$ROOT_PART" "$MNT/home"
+mount -o $BTRFS_OPTS,subvol=@log "$ROOT_PART" "$MNT/var/log"
+mount -o $BTRFS_OPTS,subvol=@tmp "$ROOT_PART" "$MNT/var/tmp"
+mount -o $BTRFS_OPTS,subvol=@pkg "$ROOT_PART" "$MNT/var/cache/pacman/pkg"
+mount -o $BTRFS_OPTS,subvol=@snapshots "$ROOT_PART" "$MNT/.snapshots"
 
-# Mount each subvolume
-mount -o $BTRFS_OPTS,subvol=@home "$ROOT_PART" "$MOUNTPOINT/home"
-mount -o $BTRFS_OPTS,subvol=@var "$ROOT_PART" "$MOUNTPOINT/var"
-mount -o $BTRFS_OPTS,subvol=@log "$ROOT_PART" "$MOUNTPOINT/var/log"
-mount -o $BTRFS_OPTS,subvol=@tmp "$ROOT_PART" "$MOUNTPOINT/var/tmp"
-mount -o $BTRFS_OPTS,subvol=@pkg "$ROOT_PART" "$MOUNTPOINT/var/cache/pacman/pkg"
-mount -o $BTRFS_OPTS,subvol=@snapshots "$ROOT_PART" "$MOUNTPOINT/.snapshots"
+# Mount EFI partition
+mkdir -p "$MNT/boot"
+mount "$EFI_PART" "$MNT/boot"
 
-# Mount the EFI partition (shared EFI)
-mount "$EFI_PART" "$MOUNTPOINT/boot"
-
-echo "All done. Your subvolumes are mounted as follows:"
-mount | grep "$ROOT_PART"
+echo "✅ All subvolumes and EFI are mounted correctly at $MNT"
