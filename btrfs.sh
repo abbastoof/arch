@@ -2,7 +2,7 @@
 set -e
 
 # Variables
-ROOT_PART="/dev/nvme0n1p2"
+ROOT_PART="/dev/nvme0n1p4"
 EFI_PART="/dev/nvme0n1p1"
 MNT="/mnt"
 BTRFS_OPTS="noatime,compress=zstd,commit=120,space_cache=v2"
@@ -27,6 +27,7 @@ mount -o $BTRFS_OPTS,subvol=@ "$ROOT_PART" "$MNT"
 # Create mountpoints
 mkdir -p "$MNT/home"
 mkdir -p "$MNT/var"
+mkdir -p "$MNT/.snapshots"
 
 # Mount @var before making nested dirs inside it
 mount -o $BTRFS_OPTS,subvol=@var "$ROOT_PART" "$MNT/var"
@@ -37,11 +38,11 @@ mkdir -p "$MNT/var/tmp"
 mkdir -p "$MNT/var/cache/pacman/pkg"
 
 # Mount nested subvolumes
-mount -o $BTRFS_OPTS,subvol=@home "$ROOT_PART" "$MNT/home"
-mount -o $BTRFS_OPTS,subvol=@log "$ROOT_PART" "$MNT/var/log"
-mount -o $BTRFS_OPTS,subvol=@tmp "$ROOT_PART" "$MNT/var/tmp"
-mount -o $BTRFS_OPTS,subvol=@pkg "$ROOT_PART" "$MNT/var/cache/pacman/pkg"
-mount -o $BTRFS_OPTS,subvol=@snapshots "$ROOT_PART" "$MNT/.snapshots"
+mount -o $BTRFS_OPTS,subvol=@home       "$ROOT_PART" "$MNT/home"
+mount -o $BTRFS_OPTS,subvol=@log        "$ROOT_PART" "$MNT/var/log"
+mount -o $BTRFS_OPTS,subvol=@tmp        "$ROOT_PART" "$MNT/var/tmp"
+mount -o $BTRFS_OPTS,subvol=@pkg        "$ROOT_PART" "$MNT/var/cache/pacman/pkg"
+mount -o $BTRFS_OPTS,subvol=@snapshots  "$ROOT_PART" "$MNT/.snapshots"
 
 # Mount EFI partition
 mkdir -p "$MNT/boot"
