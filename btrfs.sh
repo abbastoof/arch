@@ -1,66 +1,43 @@
 #!/bin/bash
 set -e
 
-# Variables
-ROOT_PART="/dev/nvme0n1p2"
-EFI_PART="/dev/nvme0n1p1"
-MNT="/mnt"
-BTRFS_OPTS="noatime,compress=zstd,commit=120,space_cache=v2"
+DISK="/dev/nvme0n1"
+EFI_DISK="/dev/nvme1n1p1"
 
-echo "==> Formatting root partition: $ROOT_PART"
-mkfs.btrfs -f "$ROOT_PART"
+echo "==> Wiping $DISK..."
+sudo wipefs -a "$DISK"
+sudo sgdisk --zap-all "$DISK"
 
-echo "==> Creating subvolumes..."
-mount "$ROOT_PART" "$MNT"
-btrfs subvolume create "$MNT/@"
-btrfs subvolume create "$MNT/@home"
-btrfs subvolume create "$MNT/@var"
-btrfs subvolume create "$MNT/@log"
-btrfs subvolume create "$MNT/@tmp"
-btrfs subvolume create "$MNT/@pkg"
-btrfs subvolume create "$MNT/@snapshots"
-umount "$MNT"
+echo "==> Creating GPT and Btrfs partition on $DISK..."
+sudo parted "$DISK" mklabel gpt
+sudo parted "$DISK" mkpart primary btrfs 1MiB 100%
+
+echo "==> Formatting $DISK partition as Btrfs..."
+sudo mkfs.btrfs -f "${DISK}p1"
+
+echo "==> Mounting $DISK partition temporarily..."
+sudo mount "${DISK}p1" /mnt
+
+echo "==> Creating Btrfs subvolumes..."
+for subvol in @ @home @pkg @log @tmp @snapshots; do
+    sudo btrfs subvolume create "/mnt/$subvol"
+done
+
+echo "==> Unmounting temporary mount..."
+sudo umount /mnt
 
 echo "==> Mounting subvolumes..."
-mount -o $BTRFS_OPTS,subvol=@ "$ROOT_PART" "$MNT"
+sudo mount -o noatime,compress=zstd:3,ssd,space_cache=v2,discard=async,subvol=@ "${DISK}p1" /mnt
 
-# Create mountpoints
-mkdir -p "$MNT/home"
-mkdir -p "$MNT/var"
-mkdir -p "$MNT/.snapshots"
+sudo mkdir -p /mnt/{boot/efi,home,var/cache/pacman/pkg,var/log,tmp,.snapshots}
 
-# Mount @var before making nested dirs inside it
-mount -o $BTRFS_OPTS,subvol=@var "$ROOT_PART" "$MNT/var"
+sudo mount -o noatime,compress=zstd:3,ssd,space_cache=v2,discard=async,subvol=@home "${DISK}p1" /mnt/home
+sudo mount -o noatime,compress=zstd:3,ssd,space_cache=v2,discard=async,subvol=@pkg "${DISK}p1" /mnt/var/cache/pacman/pkg
+sudo mount -o noatime,compress=zstd:3,ssd,space_cache=v2,discard=async,subvol=@log "${DISK}p1" /mnt/var/log
+sudo mount -o noatime,compress=zstd:3,ssd,space_cache=v2,discard=async,subvol=@tmp "${DISK}p1" /mnt/tmp
+sudo mount -o noatime,compress=zstd:3,ssd,space_cache=v2,discard=async,subvol=@snapshots "${DISK}p1" /mnt/.snapshots
 
-# Now we can safely create these
-mkdir -p "$MNT/var/log"
-mkdir -p "$MNT/var/tmp"
-mkdir -p "$MNT/var/cache/pacman/pkg"
+echo "==> Mounting existing EFI partition..."
+sudo mount "$EFI_DISK" /mnt/boot/efi
 
-# Mount nested subvolumes
-mount -o $BTRFS_OPTS,subvol=@home       "$ROOT_PART" "$MNT/home"
-mount -o $BTRFS_OPTS,subvol=@log        "$ROOT_PART" "$MNT/var/log"
-mount -o $BTRFS_OPTS,subvol=@tmp        "$ROOT_PART" "$MNT/var/tmp"
-mount -o $BTRFS_OPTS,subvol=@pkg        "$ROOT_PART" "$MNT/var/cache/pacman/pkg"
-mount -o $BTRFS_OPTS,subvol=@snapshots  "$ROOT_PART" "$MNT/.snapshots"
-
-# Mount EFI partition with confirmation
-echo "==> EFI partition detected at $EFI_PART"
-read -rp "Do you want to format the EFI partition? (yes/no): " FORMAT_EFI
-
-if [[ "$FORMAT_EFI" == "yes" ]]; then
-    echo "==> Formatting EFI partition as FAT32..."
-    mkfs.fat -F32 "$EFI_PART"
-else
-    echo "==> Skipping EFI format. Checking filesystem type..."
-    EFI_TYPE=$(blkid -s TYPE -o value "$EFI_PART")
-    if [[ "$EFI_TYPE" != "vfat" ]]; then
-        echo "⚠️ EFI partition is not vfat (found: $EFI_TYPE)"
-        echo "If this is incorrect, you may need to fix it manually."
-    fi
-fi
-
-mkdir -p "$MNT/boot"
-mount "$EFI_PART" "$MNT/boot"
-
-echo "✅ All subvolumes and EFI are mounted correctly at $MNT"
+echo "==> Done! Ready for archinstall."
