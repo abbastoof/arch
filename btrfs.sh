@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-DISK="/dev/nvme0n1"
-EFI_DISK="/dev/nvme1n1p1"
+DISK="/dev/nvme1n1"
+EFI_DISK="/dev/nvme0n1p1"
 
 echo "==> Wiping $DISK..."
 sudo wipefs -a "$DISK"
